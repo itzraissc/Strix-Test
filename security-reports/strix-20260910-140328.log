@@ -1,0 +1,8 @@
+usage: strix [-h] [-v] [--update] [-t TARGET] [--target-list PATH]
+             [--instruction INSTRUCTION] [--instruction-file INSTRUCTION_FILE]
+             [--workspace-file PATH[:DEST]] [-n] [-m {quick,standard,deep}]
+             [--scope-mode {auto,diff,full}] [--diff-base DIFF_BASE]
+             [--config CONFIG] [--mcp-config PATH] [--mcp-server NAME]
+             [--mcp-exclude NAME] [--max-budget USD] [--max-turns N]
+             [--resume RUN_NAME]
+strix: error: unrecognized arguments: --run-name strix-20260910-140328
