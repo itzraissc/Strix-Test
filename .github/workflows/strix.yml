@@ -1,46 +1,191 @@
-name: Strix Security Scan
+name: Strix Security Scan - SaaS Pentest
 
 on:
   workflow_dispatch:
     inputs:
       target_url:
-        description: 'URL do ambiente de teste/staging do seu SaaS'
+        description: 'URL do ambiente de TESTE/STAGING (nunca produção com usuários reais)'
         required: true
         default: 'https://stim.io/'
+      scan_mode:
+        description: 'Modo de scan: quick | standard | deep'
+        required: true
+        default: 'deep'
+        type: choice
+        options:
+          - quick
+          - standard
+          - deep
+      max_budget:
+        description: 'Orçamento máximo em USD para o scan'
+        required: true
+        default: '20'
+
+permissions:
+  contents: write
+  actions: read
 
 jobs:
-  strix-scan:
-    name: Executar Varredura com Strix
+  strix-pentest:
+    name: Pentest Autônomo com Strix
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
-      - name: 1. Baixar código do repositório
+      - name: 1. Checkout do repositório
         uses: actions/checkout@v4
-
-      - name: 2. Configurar ambiente Python 3.11
-        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: 3. Instalar o Strix Agent
+      - name: 2. Verificar Docker (necessário para o sandbox do Strix)
         run: |
-          python -m pip install --upgrade pip
-          pipx install strix-agent
+          docker --version
+          docker info
 
-      - name: 4. Executar Varredura
+      - name: 3. Instalar Strix (método oficial via script)
+        run: |
+          curl -sSL https://strix.ai/install | bash
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: 4. Criar arquivo de instruções detalhado
+        run: |
+          mkdir -p .strix
+          cat > .strix/instructions.md << 'EOF'
+          # CONTEXTO DO ENGAGEMENT
+
+          ## Autorização
+          Este é um teste AUTORIZADO de segurança contra um ambiente de STAGING/SIMULADO
+          que eu (proprietário) criei especificamente para pentest. Não há usuários reais,
+          não há dados reais, todos os recursos são descartáveis. Tenho autorização explícita
+          para testar todos os endpoints, fluxos de negócio e APIs deste alvo.
+
+          ## Motivação real (por que este teste está sendo feito)
+          Um SaaS idêntico, construído sobre a MESMA base de código e a MESMA IA, foi
+          completamente comprometido. O atacante conseguiu:
+            - Acesso total ao banco de dados (vazamento de todos os usuários)
+            - Criação de múltiplas VMs sem pagamento (abuso de recursos cloud)
+            - Bypass do fluxo de renovação de plano: a API de renovação aceitava ativar
+              Premium mesmo sem o pagamento ter sido confirmado
+            - Escalação horizontal: ver contas de outros usuários (IDOR)
+            - Escalação vertical: tornar-se ADM sem autorização
+          Meu SaaS compartilha a mesma arquitetura. Preciso encontrar essas MESMAS
+          falhas antes que atacantes reais o façam.
+
+          ## OBJETIVOS PRIORITÁRIOS (foco máximo aqui)
+          1. **Business Logic Flaws no fluxo de pagamento/assinatura**
+             - Teste o endpoint de RENOVAÇÃO de plano isoladamente
+             - Tente ativar Premium/plano pago SEM confirmação de pagamento
+             - Manipule parâmetros de preço, plano_id, status, período
+             - Teste race conditions: duas requisições simultâneas de renovação
+             - Teste replay de webhooks de pagamento
+             - Verifique se o backend confia em dados do client (plan_id, price, status)
+
+          2. **Broken Access Control / IDOR**
+             - Enumere IDs de usuários, contas, faturas, assinaturas
+             - Tente acessar recursos de outras contas mudando IDs
+             - Teste endpoints de API sem token, com token de outro usuário
+             - Verifique mass assignment: tente injetar `role=admin`, `is_admin=true`,
+               `plan=premium`, `balance=999999` em payloads de update
+
+          3. **Escalação de Privilégios**
+             - Procure endpoints administrativos expostos
+             - Tente JWT tampering (algoritmo none, HS256 com secret fraco)
+             - Teste header injection (X-Forwarded-For, X-Original-URL, X-User-Role)
+             - Verifique se role/permission são verificados no backend ou só no frontend
+
+          4. **Abuso de Recursos / Criação de Recursos Não Autorizados**
+             - Tente criar VMs, containers, workers, jobs sem autorização
+             - Teste limites de rate limit / quota
+             - Verifique se há endpoints internos expostos
+
+          5. **API Security (OWASP API Top 10)**
+             - Broken authentication, mass assignment, rate limiting bypass
+             - Excessive data exposure: verifique se a API retorna mais campos do que deveria
+               (ex.: password_hash, tokens, dados de outros usuários)
+
+          ## Áreas secundárias
+          - Injeção (SQLi, NoSQLi, SSTI, command injection)
+          - SSRF, XXE, deserialization
+          - XSS stored/reflected/DOM
+          - CSRF em ações sensíveis
+          - Exposição de secrets (env vars, arquivos .env, configs)
+
+          ## Metodologia esperada
+          - Para CADA achado, gere um PoC funcional (requisição HTTP exata ou script)
+          - Documente o passo-a-passo de reprodução
+          - Atribua CVSS e classificação OWASP
+          - Forneça correção concreta (código quando aplicável)
+          - Priorize achados por impacto real no negócio
+
+          ## Escopo
+          - Alvo: {{TARGET_URL}}
+          - NÃO atacar infraestrutura fora do domínio (sem subdomain takeover agressivo,
+            sem DoS, sem exfiltração de dados reais)
+          - Focar em lógica de negócio e controle de acesso
+          EOF
+          sed -i "s|{{TARGET_URL}}|${{ github.event.inputs.target_url }}|g" .strix/instructions.md
+          cat .strix/instructions.md
+
+      - name: 5. Executar Strix com escopo e instruções detalhadas
         env:
-          STRIX_LLM_API_KEY: ${{ secrets.STRIX_LLM_API_KEY }}
-          STRIX_LLM_BASE_URL: "https://integrate.api.nvidia.com/v1"
-          STRIX_LLM_MODEL: "openai/nvidia/nemotron-3-ultra-550b-a55b"
-          OPENAI_API_KEY: ${{ secrets.STRIX_LLM_API_KEY }}
-          OPENAI_BASE_URL: "https://integrate.api.nvidia.com/v1"
+          # Provider LLM via endpoint OpenAI-compatible (NVIDIA NIM)
+          STRIX_LLM: "openai/nvidia/nemotron-3-ultra-550b-a55b"
+          LLM_API_KEY: ${{ secrets.STRIX_LLM_API_KEY }}
+          LLM_API_BASE: "https://integrate.api.nvidia.com/v1"
+          # Desativa telemetria para privacidade
+          STRIX_TELEMETRY: "false"
         run: |
-          strix -n --target "${{ github.event.inputs.target_url }}"
+          mkdir -p strix_runs
+          RUN_NAME="strix-$(date +%Y%m%d-%H%M%S)"
+          echo "RUN_NAME=$RUN_NAME" >> $GITHUB_ENV
 
-      - name: 5. Salvar Relatório de Segurança como Artefato
+          strix -n \
+            --target "${{ github.event.inputs.target_url }}" \
+            --scan-mode "${{ github.event.inputs.scan_mode }}" \
+            --instruction-file .strix/instructions.md \
+            --max-budget "${{ github.event.inputs.max_budget }}" \
+            --run-name "$RUN_NAME" \
+            2>&1 | tee "strix_runs/${RUN_NAME}.log"
+
+      - name: 6. Gerar resumo do relatório
+        if: always()
+        run: |
+          {
+            echo "# 🛡️ Relatório de Pentest Strix"
+            echo ""
+            echo "**Alvo:** ${{ github.event.inputs.target_url }}"
+            echo "**Modo:** ${{ github.event.inputs.scan_mode }}"
+            echo "**Data:** $(date -u)"
+            echo "**Run:** ${{ env.RUN_NAME }}"
+            echo ""
+            echo "## Arquivos gerados"
+            echo ""
+            find strix_runs -type f -exec ls -lh {} \; || true
+            echo ""
+            echo "## Estrutura"
+            echo '```'
+            find strix_runs -type f | head -50 || true
+            echo '```'
+          } > strix_runs/SUMMARY.md
+          cat strix_runs/SUMMARY.md
+
+      - name: 7. Upload do relatório como artefato
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: relatorio-strix-saas
-          path: strix_runs/
-          
+          name: strix-report-${{ env.RUN_NAME }}
+          path: |
+            strix_runs/
+          retention-days: 90
+
+      - name: 8. Commitar relatório no repositório
+        if: always()
+        run: |
+          git config user.name "strix-bot"
+          git config user.email "strix-bot@users.noreply.github.com"
+          mkdir -p security-reports
+          cp -r strix_runs/* security-reports/ 2>/dev/null || true
+          git add security-reports/ .strix/instructions.md || true
+          git commit -m "security: relatório Strix ${{ env.RUN_NAME }} - ${{ github.event.inputs.target_url }}" || echo "Nada a commitar"
+          git push || echo "Push falhou (sem permissão ou nada a commitar)"
