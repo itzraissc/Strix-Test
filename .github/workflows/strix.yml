@@ -30,6 +30,7 @@ jobs:
     name: Pentest Autônomo Completo
     runs-on: ubuntu-latest
     timeout-minutes: 360
+    environment: STRIX_LLM_API_KEY    # ← nome EXATO do environment no GitHub
 
     steps:
       - name: 1. Checkout do repositório
@@ -71,8 +72,8 @@ jobs:
             exit 1
           fi
           echo "✓ Secrets presentes"
-          echo "  LLM_API_BASE configurado: $LLM_API_BASE"
-          echo "  STRIX_LLM configurado: $STRIX_LLM"
+          echo "  LLM_API_BASE = $LLM_API_BASE"
+          echo "  STRIX_LLM = $STRIX_LLM"
           echo "  LLM_API_KEY presente (${#LLM_API_KEY} chars)"
 
       - name: 5. Gerar arquivo de instruções com credenciais injetadas
@@ -91,8 +92,6 @@ jobs:
           SIMULADO criado pelo próprio dono especificamente para testes de segurança.
           NÃO existem usuários reais, NÃO existem dados reais, NÃO existem recursos
           reais. Tudo é descartável e pode ser explorado, modificado ou destruído.
-          Tenho autorização escrita e verbal para testar todos os endpoints, fluxos,
-          APIs e lógica de negócio deste alvo.
 
           ## CONTEXTO CRÍTICO — POR QUE ESTE TESTE EXISTE
           Um SaaS gêmeo, construído sobre a MESMA base de código e a MESMA stack de IA,
@@ -100,8 +99,7 @@ jobs:
             1. Vazaram o banco de dados inteiro (todos os usuários)
             2. Criaram múltiplas VMs sem pagar nada (abuso de cloud)
             3. Bypassaram o fluxo de renovação de plano: a API de renovação ativava
-               Premium SEM o pagamento ter sido confirmado. A brecha estava em um
-               endpoint de renovação que aceitava ativar o plano sem validar pagamento.
+               Premium SEM o pagamento ter sido confirmado
             4. IDOR: viram contas de outros usuários mudando IDs
             5. Escalação de privilégios: se tornaram ADM sem autorização
 
@@ -109,88 +107,81 @@ jobs:
           falhas ANTES que atacantes reais as encontrem.
 
           ## CREDENCIAIS DE TESTE (grey-box)
-          Use estas credenciais para autenticar e testar a área logada:
           - Usuário: {{TEST_USER}}
           - Senha: {{TEST_PASS}}
-          - Cookie de sessão (se aplicável): {{TEST_COOKIE}}
+          - Cookie de sessão: {{TEST_COOKIE}}
 
-          Fluxo sugerido: faça login com essas credenciais, capture o token/cookie de
-          sessão, e use-o para testar os endpoints autenticados. Teste também o que
-          acontece quando você MANIPULA o token (JWT tampering, role injection, etc).
+          Faça login com essas credenciais, capture o token/cookie de sessão, e use-o
+          para testar os endpoints autenticados. Teste JWT tampering e role injection.
 
-          ## OBJETIVOS PRIORITÁRIOS (foco máximo)
+          ## OBJETIVOS PRIORITÁRIOS
 
           ### 1. Business Logic Flaws no pagamento/assinatura — MÁXIMA PRIORIDADE
           - Localize o endpoint de RENOVAÇÃO de plano isoladamente
-          - Tente ativar Premium/plano pago SEM confirmação de pagamento
-          - Manipule parâmetros: plan_id, price, amount, status, period, currency
-          - Teste race conditions: dispare 2+ requisições simultâneas de renovação
-          - Teste replay de webhooks de pagamento (reenvie o mesmo payload)
-          - Verifique se o backend confia em dados do client (plan_id, price, role)
-          - Teste fluxo: cancelar -> renovar -> upgrade sem pagar
-          - Teste downgrade/upgrade com valores negativos, zero, ou fora do range
-          - Verifique se há endpoint administrativo de "ativar plano" exposto
+          - Tente ativar Premium SEM confirmação de pagamento
+          - Manipule: plan_id, price, amount, status, period, currency
+          - Race conditions: 2+ requisições simultâneas de renovação
+          - Replay de webhooks de pagamento
+          - Backend confia em dados do client (plan_id, price, role)?
+          - Fluxo: cancelar -> renovar -> upgrade sem pagar
+          - Valores negativos, zero, ou fora do range
+          - Endpoint administrativo de "ativar plano" exposto?
 
           ### 2. Broken Access Control / IDOR
-          - Enumere IDs de usuários, contas, faturas, assinaturas, sessões
-          - Tente acessar recursos de OUTRAS contas mudando IDs (incrementais, UUIDs)
-          - Teste endpoints de API sem token, com token expirado, com token de outro user
-          - Teste mass assignment: injete role=admin, is_admin=true, plan=premium,
-            balance=999999, verified=true em payloads de update de perfil
-          - Verifique se a API retorna mais campos do que deveria (password_hash,
-            tokens, dados de outros usuários, PII)
-          - Teste acesso direto a objetos referenciados por ID em TODOS os recursos
+          - Enumere IDs de usuários, contas, faturas, assinaturas
+          - Acesse recursos de OUTRAS contas mudando IDs
+          - Endpoints sem token, com token expirado, com token de outro user
+          - Mass assignment: role=admin, is_admin=true, plan=premium, balance=999999
+          - API retorna password_hash, tokens, dados de outros usuários?
 
           ### 3. Escalação de Privilégios
-          - Procure endpoints administrativos expostos (/admin, /internal, /debug)
-          - Tente JWT tampering: alg=none, HS256 com secret fraco, kid injection
-          - Teste header injection: X-Forwarded-For, X-Original-URL, X-User-Role,
-            X-Admin, X-Forwarded-Host
-          - Verifique se role/permission são checados no BACKEND ou só no frontend
-          - Tente forçar role admin via mass assignment no cadastro/update
-          - Verifique se há rota de "promover usuário" sem checagem de admin
+          - Endpoints admin expostos (/admin, /internal, /debug)
+          - JWT tampering: alg=none, HS256 com secret fraco, kid injection
+          - Header injection: X-Forwarded-For, X-Original-URL, X-User-Role, X-Admin
+          - Role/permission checados no BACKEND ou só no frontend?
+          - Forçar role admin via mass assignment
+          - Rota de "promover usuário" sem checagem de admin?
 
           ### 4. Abuso de Recursos / Criação Não Autorizada
-          - Tente criar VMs, containers, workers, jobs, filas sem autorização
-          - Teste limites de rate limit e quota (bypass via headers, IP spoofing)
-          - Verifique se há endpoints internos expostos (cloud metadata, debug, health)
-          - Teste criação de recursos pagos sem plano ativo
-          - Verifique se há SSRF para metadata de cloud (169.254.169.254)
+          - Criar VMs, containers, workers, jobs sem autorização
+          - Rate limit / quota bypass
+          - Endpoints internos expostos (cloud metadata, debug, health)
+          - Criação de recursos pagos sem plano ativo
+          - SSRF para metadata de cloud (169.254.169.254)
 
           ### 5. API Security (OWASP API Top 10)
           - Broken authentication e authorization
           - Mass assignment
           - Rate limiting bypass
           - Excessive data exposure
-          - Improper assets management (versões antigas de API expostas)
+          - Versões antigas de API expostas
 
           ### 6. Áreas secundárias
           - Injeção: SQLi, NoSQLi, SSTI, command injection, LDAP
           - SSRF, XXE, insecure deserialization, RCE
           - XSS: stored, reflected, DOM
-          - CSRF em ações sensíveis (renovação, troca de senha, admin)
-          - Exposição de secrets (.env, configs, variáveis de ambiente, git history)
+          - CSRF em ações sensíveis
+          - Exposição de secrets
           - Subdomain enumeration e fingerprinting
 
           ## METODOLOGIA OBRIGATÓRIA PARA CADA ACHADO
-          1. Descrição clara do que é e onde está
-          2. Passo-a-passo de reprodução (comandos exatos, requisições HTTP cruas)
-          3. PoC funcional (script Python ou curl que reproduz o exploit)
-          4. Impacto real no negócio (o que um atacante consegue fazer)
-          5. CVSS score + classificação OWASP
-          6. Correção concreta com código (não teoria — snippet real)
+          1. Descrição clara
+          2. Passo-a-passo de reprodução (HTTP cru)
+          3. PoC funcional (script ou curl)
+          4. Impacto no negócio
+          5. CVSS + OWASP
+          6. Correção com código real
 
           ## ORDEM DE PRIORIDADE
-          1. Payment/subscription bypass (o que matou o SaaS do meu amigo)
-          2. IDOR e vazamento de dados entre contas
-          3. Escalação de privilégios (admin)
-          4. Criação de recursos não autorizados (VMs)
+          1. Payment/subscription bypass
+          2. IDOR e vazamento entre contas
+          3. Escalação de privilégios
+          4. Criação de recursos não autorizados
           5. Resto
 
           ## LIMITES
           - Alvo: {{TARGET_URL}}
-          - Não fazer DoS volumétrico (o ambiente é limitado)
-          - Não exfiltrar dados reais (não existem, mas mantenha o escopo)
+          - Sem DoS volumétrico
           - Focar em lógica de negócio e controle de acesso
           EOF
 
@@ -199,7 +190,6 @@ jobs:
           sed -i "s|{{TEST_PASS}}|${TEST_PASS}|g" .strix/instructions.md
           sed -i "s|{{TEST_COOKIE}}|${TEST_COOKIE}|g" .strix/instructions.md
 
-          # Sanitiza antes de imprimir no log
           sed -e "s|${TEST_USER}|<REDACTED_USER>|g" \
               -e "s|${TEST_PASS}|<REDACTED_PASS>|g" \
               -e "s|${TEST_COOKIE}|<REDACTED_COOKIE>|g" \
@@ -216,7 +206,6 @@ jobs:
           RUN_NAME="strix-$(date +%Y%m%d-%H%M%S)"
           echo "RUN_NAME=$RUN_NAME" >> $GITHUB_ENV
 
-          # Strix NÃO aceita --run-name. Ele gera o nome internamente.
           set +e
           strix -n \
             --target "${{ github.event.inputs.target_url }}" \
@@ -226,13 +215,11 @@ jobs:
             2>&1 | tee "strix_runs/${RUN_NAME}.log"
           STRIX_EXIT=$?
           set -e
-          echo "Strix exit code: $STRIX_EXIT"
           echo "STRIX_EXIT=$STRIX_EXIT" >> $GITHUB_ENV
+          echo "Strix exit code: $STRIX_EXIT"
 
-          # Captura os diretórios de run gerados pelo Strix em locais conhecidos
-          for d in "$HOME/.strix/runs" "./strix_runs" "./runs" "$HOME/.strix"; do
+          for d in "$HOME/.strix/runs" "./strix_runs" "./runs"; do
             if [ -d "$d" ]; then
-              echo "Encontrado: $d"
               cp -r "$d"/* strix_runs/ 2>/dev/null || true
             fi
           done
@@ -241,14 +228,15 @@ jobs:
       - name: 7. Gerar resumo do relatório
         if: always()
         run: |
+          mkdir -p strix_runs
           {
             echo "# Relatório de Pentest Strix"
             echo ""
             echo "**Alvo:** ${{ github.event.inputs.target_url }}"
             echo "**Modo:** ${{ github.event.inputs.scan_mode }}"
             echo "**Data:** $(date -u)"
-            echo "**Run:** ${{ env.RUN_NAME }}"
-            echo "**Exit code do Strix:** ${{ env.STRIX_EXIT }}"
+            echo "**Run:** ${RUN_NAME}"
+            echo "**Exit code do Strix:** ${STRIX_EXIT}"
             echo ""
             echo "## Arquivos gerados"
             echo ""
@@ -280,10 +268,15 @@ jobs:
           cp -r strix_runs/* security-reports/${RUN_NAME}/ 2>/dev/null || true
 
           if [ -f .strix/instructions.md ]; then
-            sed -i -e "s|${{ secrets.STRIX_TEST_USER }}|<REDACTED>|g" \
-                   -e "s|${{ secrets.STRIX_TEST_PASS }}|<REDACTED>|g" \
-                   -e "s|${{ secrets.STRIX_TEST_COOKIE }}|<REDACTED>|g" \
-                   .strix/instructions.md
+            if [ -n "${{ secrets.STRIX_TEST_USER }}" ]; then
+              sed -i "s|${{ secrets.STRIX_TEST_USER }}|<REDACTED>|g" .strix/instructions.md
+            fi
+            if [ -n "${{ secrets.STRIX_TEST_PASS }}" ]; then
+              sed -i "s|${{ secrets.STRIX_TEST_PASS }}|<REDACTED>|g" .strix/instructions.md
+            fi
+            if [ -n "${{ secrets.STRIX_TEST_COOKIE }}" ]; then
+              sed -i "s|${{ secrets.STRIX_TEST_COOKIE }}|<REDACTED>|g" .strix/instructions.md
+            fi
             cp .strix/instructions.md security-reports/${RUN_NAME}/instructions.md
           fi
 
